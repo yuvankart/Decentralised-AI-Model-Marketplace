@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Model Marketplace</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="toolbar" aria-label="Wallet and server controls">
+        <div>
+          <p class="eyebrow">Decentralized AI Model Marketplace</p>
+          <h1>Upload, pay, run, and rate AI models.</h1>
+        </div>
+        <div class="wallet-panel">
+          <label for="apiBase">API server</label>
+          <input id="apiBase" type="url" value="http://127.0.0.1:3001">
+          <button id="connectWallet" type="button">Connect MetaMask</button>
+          <p id="walletAddress" class="muted">Wallet not connected</p>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="Marketplace actions">
+        <form id="uploadForm" class="panel">
+          <h2>Upload Model</h2>
+          <p class="muted">Upload a JSON model spec. Example: linear, multiply, or add.</p>
+          <label for="modelFile">Model JSON file</label>
+          <input id="modelFile" name="file" type="file" accept="application/json,.json" required>
+          <label for="modelPrice">Price in wei</label>
+          <input id="modelPrice" name="price" type="number" min="1" value="100" required>
+          <button type="submit">Upload and Register</button>
+        </form>
+
+        <form id="registerForm" class="panel">
+          <h2>Register Existing IPFS Model</h2>
+          <p class="muted">Use this if the model file is already on IPFS.</p>
+          <label for="ipfsHash">IPFS hash or URL</label>
+          <input id="ipfsHash" name="ipfsHash" type="text" placeholder="Qm... or ipfs://..." required>
+          <label for="registerPrice">Price in wei</label>
+          <input id="registerPrice" name="price" type="number" min="1" value="100" required>
+          <button type="submit">Register Model</button>
+        </form>
+
+        <form id="useForm" class="panel">
+          <h2>Use Model</h2>
+          <p class="muted">Payment is sent first, then the FastAPI runner returns the result.</p>
+          <label for="useModelId">Model ID</label>
+          <input id="useModelId" name="modelId" type="number" min="1" required>
+          <label for="inputData">Input value</label>
+          <input id="inputData" name="inputData" type="number" step="any" required>
+          <button type="submit">Pay and Run</button>
+        </form>
+
+        <form id="rateForm" class="panel">
+          <h2>Rate Model</h2>
+          <p class="muted">Reputation is optional, but available for the marketplace.</p>
+          <label for="rateModelId">Model ID</label>
+          <input id="rateModelId" name="modelId" type="number" min="1" required>
+          <label for="rating">Rating</label>
+          <select id="rating" name="rating" required>
+            <option value="5">5</option>
+            <option value="4">4</option>
+            <option value="3">3</option>
+            <option value="2">2</option>
+            <option value="1">1</option>
+          </select>
+          <button type="submit">Submit Rating</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Available Models</h2>
+            <p class="muted">Registered models from the blockchain registry.</p>
+          </div>
+          <button id="refreshModels" type="button">Refresh Models</button>
+        </div>
+        <div id="modelsList" class="models-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Result Log</h2>
+        <pre id="resultLog">Ready.</pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
