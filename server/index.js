@@ -41,6 +41,58 @@ app.get("/models", async (req, res) => {
   }
 });
 
+const axios = require("axios");
+
+app.post("/use-model", async (req, res) => {
+  try {
+    const { modelId, inputData } = req.body;
+
+    // 1️⃣ Get model from blockchain
+    const model = await contract.methods.models(modelId).call();
+
+    if (model.id === "0") {
+      return res.status(404).json({ error: "Model not found" });
+    }
+
+    // 2️⃣ Call FastAPI (run AI model)
+    const response = await axios.post("http://127.0.0.1:8000/run-model", null, {
+      params: {
+        model_id: parseInt(modelId),
+        input_data: parseFloat(inputData)
+      }
+    });
+
+    const result = response.data;
+
+    // 3️⃣ Call smart contract (log usage / payment)
+    const accounts = await web3.eth.getAccounts();
+
+    await contract.methods.useModel(modelId).send({
+      from: accounts[0],
+      value: model.pricePerUse,
+      gas: 3000000,
+      gasPrice: "20000000000"
+    });
+
+    // 4️⃣ Return result
+    const cleanModel = {
+      id: model.id.toString(),
+      owner: model.owner,
+      ipfsHash: model.ipfsHash,
+      pricePerUse: model.pricePerUse.toString()
+    };
+
+    res.json({
+      model: cleanModel,
+      result
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error using model" });
+  }
+});
+
 app.listen(3001, () => {
   console.log("Server running on port 3001");
 });

@@ -13,12 +13,12 @@ def home():
 
 
 @app.post("/predict")
-def predict(input_data: float):
+def predict(input_data: float | int):
     result = simple_model(input_data)
     return {"input": input_data, "result": result}
 
 @app.post("/run-model")
-def run_model(model_id: int, input_data: float):
+def run_model(model_id: int, input_data: float | int):
     # Simulating fetching model (later from blockchain/IPFS)
 
     if model_id != 1:
