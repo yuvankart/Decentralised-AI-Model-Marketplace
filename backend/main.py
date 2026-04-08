@@ -16,16 +16,44 @@ DEFAULT_MODEL_SPEC = {
     "bias": 0,
 }
 
-IPFS_GATEWAY_URL = os.getenv("IPFS_GATEWAY_URL", "https://gateway.pinata.cloud/ipfs/")
+DEFAULT_IPFS_GATEWAYS = [
+    "https://gateway.pinata.cloud/ipfs/",
+    "https://ipfs.io/ipfs/",
+    "https://dweb.link/ipfs/",
+    "https://w3s.link/ipfs/",
+]
+
+IPFS_GATEWAY_URLS = [
+    gateway.strip()
+    for gateway in os.getenv("IPFS_GATEWAY_URLS", ",".join(DEFAULT_IPFS_GATEWAYS)).split(",")
+    if gateway.strip()
+]
 
 
-def build_ipfs_url(ipfs_hash: str) -> str:
+def build_ipfs_urls(ipfs_hash: str) -> list[str]:
     if ipfs_hash.startswith("http://") or ipfs_hash.startswith("https://"):
-        return ipfs_hash
+        return [ipfs_hash]
 
     cid = ipfs_hash.replace("ipfs://", "", 1)
-    gateway = IPFS_GATEWAY_URL.rstrip("/")
-    return f"{gateway}/{cid}"
+    return [f"{gateway.rstrip('/')}/{cid}" for gateway in IPFS_GATEWAY_URLS]
+
+
+def fetch_model_spec(ipfs_hash: str) -> str:
+    errors = []
+
+    for url in build_ipfs_urls(ipfs_hash):
+        try:
+            with urlopen(url, timeout=10) as response:
+                return response.read().decode("utf-8")
+        except HTTPError as exc:
+            errors.append(f"{url} -> HTTP {exc.code}")
+        except URLError as exc:
+            errors.append(f"{url} -> {exc.reason}")
+        except TimeoutError:
+            errors.append(f"{url} -> timed out")
+
+    detail = "; ".join(errors) if errors else "no IPFS gateways configured"
+    raise HTTPException(status_code=502, detail=f"Could not fetch model from IPFS: {detail}")
 
 
 @lru_cache(maxsize=128)
@@ -33,17 +61,7 @@ def load_model_spec(ipfs_hash: str | None) -> dict[str, Any]:
     if not ipfs_hash:
         return DEFAULT_MODEL_SPEC
 
-    url = build_ipfs_url(ipfs_hash)
-
-    try:
-        with urlopen(url, timeout=10) as response:
-            raw_model = response.read().decode("utf-8")
-    except HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Could not fetch model from IPFS: HTTP {exc.code}") from exc
-    except URLError as exc:
-        raise HTTPException(status_code=502, detail=f"Could not fetch model from IPFS: {exc.reason}") from exc
-    except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail="Timed out fetching model from IPFS") from exc
+    raw_model = fetch_model_spec(ipfs_hash)
 
     try:
         model_spec = json.loads(raw_model)
