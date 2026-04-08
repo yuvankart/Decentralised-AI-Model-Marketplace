@@ -5,7 +5,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 
 app = FastAPI()
 
@@ -74,6 +74,16 @@ def load_model_spec(ipfs_hash: str | None) -> dict[str, Any]:
     return model_spec
 
 
+def validate_model_spec(model_spec: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(model_spec, dict):
+        raise HTTPException(status_code=400, detail="Model spec must be a JSON object")
+
+    if "type" in model_spec and not isinstance(model_spec["type"], str):
+        raise HTTPException(status_code=400, detail="Model field 'type' must be a string")
+
+    return model_spec
+
+
 def get_number(model_spec: dict[str, Any], key: str, default: float) -> float:
     try:
         return float(model_spec.get(key, default))
@@ -112,18 +122,23 @@ def predict(input_data: float | int):
     return {"input": input_data, "result": result}
 
 @app.post("/run-model")
-def run_model(model_id: int, input_data: float | int, ipfs_hash: str | None = None):
+def run_model(
+    model_id: int,
+    input_data: float | int,
+    ipfs_hash: str | None = None,
+    model_spec: dict[str, Any] | None = Body(default=None, embed=True),
+):
     # The Node server checks the blockchain registry before calling this endpoint.
     if model_id < 1:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    model_spec = load_model_spec(ipfs_hash)
-    result = run_model_spec(model_spec, input_data)
+    spec = validate_model_spec(model_spec) if model_spec else load_model_spec(ipfs_hash)
+    result = run_model_spec(spec, input_data)
 
     return {
         "model_id": model_id,
-        "model_name": model_spec.get("name", "Unnamed model"),
-        "model_type": model_spec.get("type", "linear"),
+        "model_name": spec.get("name", "Unnamed model"),
+        "model_type": spec.get("type", "linear"),
         "input": input_data,
         "result": result
     }

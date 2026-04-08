@@ -1,6 +1,7 @@
 const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
+const fs = require("fs");
 const express = require("express");
 const { Web3 } = require("web3");
 const cors = require("cors");
@@ -19,6 +20,7 @@ const web3 = new Web3(process.env.GANACHE_URL || "http://127.0.0.1:7545");
 const DEFAULT_NETWORK_ID = process.env.TRUFFLE_NETWORK_ID || "5777";
 const DEFAULT_MODEL_PRICE = process.env.DEFAULT_MODEL_PRICE_WEI || "100";
 const MODEL_RUNNER_URL = process.env.MODEL_RUNNER_URL || "http://127.0.0.1:8000/run-model";
+const MODEL_CACHE_DIR = path.resolve(__dirname, "model-cache");
 
 app.use(cors());
 app.use(express.json());
@@ -90,6 +92,46 @@ async function addModelStats(model) {
   };
 }
 
+function parseModelSpec(buffer) {
+  try {
+    return JSON.parse(buffer.toString("utf8"));
+  } catch (error) {
+    throw new Error("Uploaded model must be a valid JSON file");
+  }
+}
+
+function validateModelSpec(modelSpec) {
+  if (!modelSpec || Array.isArray(modelSpec) || typeof modelSpec !== "object") {
+    throw new Error("Uploaded model spec must be a JSON object");
+  }
+
+  if (modelSpec.type && !["linear", "multiply", "add"].includes(modelSpec.type)) {
+    throw new Error("Unsupported model type. Use linear, multiply, or add");
+  }
+}
+
+function getModelCachePath(cid) {
+  const safeCid = cid.replace(/[^a-zA-Z0-9_-]/g, "");
+  return path.join(MODEL_CACHE_DIR, `${safeCid}.json`);
+}
+
+async function cacheModelSpec(cid, modelSpec) {
+  fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
+  await fs.promises.writeFile(
+    getModelCachePath(cid),
+    JSON.stringify(modelSpec, null, 2)
+  );
+}
+
+async function getCachedModelSpec(cid) {
+  try {
+    const rawModel = await fs.promises.readFile(getModelCachePath(cid), "utf8");
+    return JSON.parse(rawModel);
+  } catch {
+    return null;
+  }
+}
+
 app.get("/", (req, res) => {
   res.json({ message: "Node Web3 Server Running" });
 });
@@ -150,6 +192,9 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
+    const modelSpec = parseModelSpec(req.file.buffer);
+    validateModelSpec(modelSpec);
+
     const data = new FormData();
     data.append("file", req.file.buffer, req.file.originalname);
 
@@ -166,6 +211,8 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
     );
 
     const cid = response.data.IpfsHash;
+    await cacheModelSpec(cid, modelSpec);
+
     const price = req.body.price || DEFAULT_MODEL_PRICE;
     const from = await getSender(req.body.account);
 
@@ -212,7 +259,8 @@ app.post("/use-model", async (req, res) => {
       gasPrice: "20000000000",
     });
 
-    const response = await axios.post(MODEL_RUNNER_URL, null, {
+    const modelSpec = await getCachedModelSpec(model.ipfsHash);
+    const response = await axios.post(MODEL_RUNNER_URL, modelSpec ? { model_spec: modelSpec } : null, {
       params: {
         model_id: Number(modelId),
         input_data: Number(inputData),
