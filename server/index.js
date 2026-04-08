@@ -66,13 +66,24 @@ function isMissingModel(model) {
 }
 
 async function getSender(requestedAccount) {
-  if (requestedAccount) {
-    return requestedAccount;
-  }
-
   const accounts = await web3.eth.getAccounts();
   if (!accounts.length) {
     throw new Error("No unlocked Ganache accounts found");
+  }
+
+  if (requestedAccount) {
+    const normalizedAccount = requestedAccount.toLowerCase();
+    const matchingAccount = accounts.find(
+      (account) => account.toLowerCase() === normalizedAccount
+    );
+
+    if (matchingAccount) {
+      return matchingAccount;
+    }
+
+    console.warn(
+      `Requested account ${requestedAccount} is not unlocked in Ganache; using ${accounts[0]} instead.`
+    );
   }
 
   return accounts[0];

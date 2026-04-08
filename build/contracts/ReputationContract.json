@@ -8255,12 +8255,12 @@
     "5777": {
       "events": {},
       "links": {},
-      "address": "0xA4F04d2CEE6aAD4D4A0081e21618932620B936d7",
-      "transactionHash": "0x9b42a414bd7c4843f062bb4319758ada8677e76fcebc5712283759644efbba96"
+      "address": "0x77748d85791ca75Fc70b5d5d01FB0cCe0E9B514e",
+      "transactionHash": "0xde54aaf10e0e83866bb9f86401f4cfea25d12b7c4ad46f06918bf55886996e63"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2026-04-08T08:03:45.640Z",
+  "updatedAt": "2026-04-08T10:23:47.001Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

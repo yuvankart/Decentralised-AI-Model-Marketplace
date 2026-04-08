@@ -109,12 +109,14 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-async function refreshModels() {
+async function refreshModels({ updateLog = false } = {}) {
   try {
     refreshModelsButton.disabled = true;
     const models = await requestJson("/models");
     renderModels(models);
-    writeLog({ message: "Models loaded", count: models.length });
+    if (updateLog) {
+      writeLog({ message: "Models loaded", count: models.length });
+    }
   } catch (error) {
     writeLog(error.message, true);
   } finally {
@@ -136,7 +138,7 @@ uploadForm.addEventListener("submit", async (event) => {
       body: formData,
     });
     writeLog(result);
-    await refreshModels();
+    await refreshModels({ updateLog: false });
     uploadForm.reset();
     document.querySelector("#modelPrice").value = "100";
   } catch (error) {
@@ -159,7 +161,7 @@ registerForm.addEventListener("submit", async (event) => {
       }),
     });
     writeLog(result);
-    await refreshModels();
+    await refreshModels({ updateLog: false });
     registerForm.reset();
     document.querySelector("#registerPrice").value = "100";
   } catch (error) {
@@ -182,7 +184,7 @@ useForm.addEventListener("submit", async (event) => {
       }),
     });
     writeLog(result);
-    await refreshModels();
+    await refreshModels({ updateLog: false });
   } catch (error) {
     writeLog(error.message, true);
   }
@@ -203,13 +205,13 @@ rateForm.addEventListener("submit", async (event) => {
       }),
     });
     writeLog(result);
-    await refreshModels();
+    await refreshModels({ updateLog: false });
   } catch (error) {
     writeLog(error.message, true);
   }
 });
 
 connectWalletButton.addEventListener("click", connectWallet);
-refreshModelsButton.addEventListener("click", refreshModels);
+refreshModelsButton.addEventListener("click", () => refreshModels({ updateLog: true }));
 
 refreshModels();
