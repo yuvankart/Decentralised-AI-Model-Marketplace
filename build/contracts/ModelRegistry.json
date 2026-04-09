@@ -12039,12 +12039,12 @@
     "5777": {
       "events": {},
       "links": {},
-      "address": "0x6A565e44CD21Aa5650446a9a68E0a6F12842460C",
-      "transactionHash": "0x55715331bffdb6dee7c251c799d557be837da379a30a93b2d43234bed4a45dda"
+      "address": "0x3B8aec5973bdda5788946E739C6cdA84c8d08bce",
+      "transactionHash": "0x897a1a6f86e44e67ffcf00065816419fa2af17ba58315ae2f4abebb9c1b3a86e"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2026-04-08T20:20:07.212Z",
+  "updatedAt": "2026-04-09T06:49:50.023Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

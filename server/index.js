@@ -21,6 +21,7 @@ const DEFAULT_NETWORK_ID = process.env.TRUFFLE_NETWORK_ID || "5777";
 const DEFAULT_MODEL_PRICE = process.env.DEFAULT_MODEL_PRICE_WEI || "100";
 const MODEL_RUNNER_URL = process.env.MODEL_RUNNER_URL || "http://127.0.0.1:8000/run-model";
 const MODEL_CACHE_DIR = path.resolve(__dirname, "model-cache");
+const WEB3_BUNDLE_PATH = path.resolve(__dirname, "node_modules", "web3", "dist", "web3.min.js");
 
 app.use(cors());
 app.use(express.json());
@@ -147,6 +148,37 @@ app.get("/", (req, res) => {
   res.json({ message: "Node Web3 Server Running" });
 });
 
+app.get("/web3.min.js", (req, res) => {
+  res.sendFile(WEB3_BUNDLE_PATH);
+});
+
+app.get("/contract-config", async (req, res) => {
+  try {
+    const chainId = await web3.eth.getChainId();
+
+    res.json({
+      chainId: chainId.toString(),
+      contracts: {
+        modelRegistry: {
+          address: getDeployedAddress(ModelRegistryJSON),
+          abi: ModelRegistryJSON.abi,
+        },
+        paymentContract: {
+          address: getDeployedAddress(PaymentJSON),
+          abi: PaymentJSON.abi,
+        },
+        reputationContract: {
+          address: getDeployedAddress(ReputationJSON),
+          abi: ReputationJSON.abi,
+        },
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error loading contract configuration" });
+  }
+});
+
 app.get("/models", async (req, res) => {
   try {
     const models = await modelRegistry.methods.listModels().call();
@@ -225,22 +257,12 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
     await cacheModelSpec(cid, modelSpec);
 
     const price = req.body.price || DEFAULT_MODEL_PRICE;
-    const from = await getSender(req.body.account);
-
-    const receipt = await modelRegistry.methods.registerModel(cid, price).send({
-      from,
-      gas: 3000000,
-      gasPrice: "20000000000",
-    });
-
-    const modelId = await modelRegistry.methods.modelCount().call();
-    const model = await modelRegistry.methods.getModel(modelId).call();
 
     res.json({
-      message: "Model uploaded and registered",
+      message: "Model uploaded to IPFS. Register it with MetaMask.",
       cid,
-      model: formatModel(model),
-      transactionHash: receipt.transactionHash,
+      price: price.toString(),
+      modelSpec,
     });
   } catch (error) {
     console.error(error.response?.data || error.message);
@@ -250,7 +272,7 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
 
 app.post("/use-model", async (req, res) => {
   try {
-    const { modelId, inputData, account } = req.body;
+    const { modelId, inputData } = req.body;
 
     if (!modelId || inputData === undefined) {
       return res.status(400).json({ error: "modelId and inputData are required" });
@@ -262,14 +284,6 @@ app.post("/use-model", async (req, res) => {
       return res.status(404).json({ error: "Model not found" });
     }
 
-    const from = await getSender(account);
-    const paymentReceipt = await paymentContract.methods.payForModel(modelId).send({
-      from,
-      value: model.price.toString(),
-      gas: 3000000,
-      gasPrice: "20000000000",
-    });
-
     const modelSpec = await getCachedModelSpec(model.ipfsHash);
     const response = await axios.post(MODEL_RUNNER_URL, modelSpec ? { model_spec: modelSpec } : null, {
       params: {
@@ -280,10 +294,9 @@ app.post("/use-model", async (req, res) => {
     });
 
     res.json({
-      message: "Model paid for and used",
+      message: "Model executed after payment",
       model: formatModel(model),
       result: response.data,
-      paymentTransactionHash: paymentReceipt.transactionHash,
     });
   } catch (error) {
     console.error(error.response?.data || error.message);

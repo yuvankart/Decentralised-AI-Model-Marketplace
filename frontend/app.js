@@ -1,5 +1,7 @@
 const state = {
   account: "",
+  web3: null,
+  contracts: null,
 };
 
 const apiBaseInput = document.querySelector("#apiBase");
@@ -12,6 +14,7 @@ const rateForm = document.querySelector("#rateForm");
 const refreshModelsButton = document.querySelector("#refreshModels");
 const modelsList = document.querySelector("#modelsList");
 const resultLog = document.querySelector("#resultLog");
+const LEGACY_GAS_PRICE = "20000000000";
 
 function getApiBase() {
   return apiBaseInput.value.replace(/\/$/, "");
@@ -21,10 +24,6 @@ function writeLog(message, isError = false) {
   resultLog.textContent =
     typeof message === "string" ? message : JSON.stringify(message, null, 2);
   resultLog.classList.toggle("status-error", isError);
-}
-
-function getAccountPayload() {
-  return state.account ? { account: state.account } : {};
 }
 
 async function requestJson(path, options = {}) {
@@ -42,20 +41,13 @@ async function requestJson(path, options = {}) {
   return body;
 }
 
-async function connectWallet() {
-  if (!window.ethereum) {
-    writeLog("MetaMask is not available in this browser.", true);
-    return;
-  }
-
-  const accounts = await window.ethereum.request({
-    method: "eth_requestAccounts",
-  });
-
-  state.account = accounts[0] || "";
-  walletAddress.textContent = state.account
-    ? `Connected: ${state.account}`
-    : "Wallet not connected";
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function fillModelId(modelId) {
@@ -100,15 +92,6 @@ function renderModels(models) {
   });
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 async function refreshModels({ updateLog = false } = {}) {
   try {
     refreshModelsButton.disabled = true;
@@ -124,20 +107,117 @@ async function refreshModels({ updateLog = false } = {}) {
   }
 }
 
+async function ensureWalletConnected() {
+  if (!window.ethereum) {
+    throw new Error("MetaMask is not available in this browser.");
+  }
+
+  if (!state.account) {
+    await connectWallet();
+  }
+
+  if (!state.account) {
+    throw new Error("Connect MetaMask before sending blockchain transactions.");
+  }
+}
+
+async function loadContractConfig() {
+  const config = await requestJson("/contract-config");
+
+  if (!window.Web3) {
+    throw new Error("Web3 bundle did not load.");
+  }
+
+  if (!state.web3) {
+    state.web3 = new window.Web3(window.ethereum);
+  }
+
+  state.contracts = {
+    config,
+    modelRegistry: new state.web3.eth.Contract(
+      config.contracts.modelRegistry.abi,
+      config.contracts.modelRegistry.address
+    ),
+    paymentContract: new state.web3.eth.Contract(
+      config.contracts.paymentContract.abi,
+      config.contracts.paymentContract.address
+    ),
+    reputationContract: new state.web3.eth.Contract(
+      config.contracts.reputationContract.abi,
+      config.contracts.reputationContract.address
+    ),
+  };
+}
+
+async function ensureContractsLoaded() {
+  if (!state.contracts) {
+    await loadContractConfig();
+  }
+
+  return state.contracts;
+}
+
+async function sendLegacyTransaction(method, options = {}) {
+  const txOptions = {
+    from: state.account,
+    gasPrice: LEGACY_GAS_PRICE,
+    ...options,
+  };
+
+  return method.send(txOptions);
+}
+
+async function connectWallet() {
+  if (!window.ethereum) {
+    writeLog("MetaMask is not available in this browser.", true);
+    return;
+  }
+
+  const accounts = await window.ethereum.request({
+    method: "eth_requestAccounts",
+  });
+
+  state.account = accounts[0] || "";
+  walletAddress.textContent = state.account
+    ? `Connected: ${state.account}`
+    : "Wallet not connected";
+
+  await ensureContractsLoaded();
+}
+
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", (accounts) => {
+    state.account = accounts[0] || "";
+    walletAddress.textContent = state.account
+      ? `Connected: ${state.account}`
+      : "Wallet not connected";
+  });
+}
+
 uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const formData = new FormData(uploadForm);
-  if (state.account) {
-    formData.append("account", state.account);
-  }
-
   try {
-    const result = await requestJson("/upload-model", {
+    await ensureWalletConnected();
+    const contracts = await ensureContractsLoaded();
+
+    const formData = new FormData(uploadForm);
+    const price = formData.get("price");
+    const uploadResult = await requestJson("/upload-model", {
       method: "POST",
       body: formData,
     });
-    writeLog(result);
+
+    const receipt = await sendLegacyTransaction(
+      contracts.modelRegistry.methods.registerModel(uploadResult.cid, price)
+    );
+
+    writeLog({
+      message: "Model uploaded to IPFS and registered on-chain through MetaMask.",
+      cid: uploadResult.cid,
+      transactionHash: receipt.transactionHash,
+      from: state.account,
+    });
     await refreshModels({ updateLog: false });
     uploadForm.reset();
     document.querySelector("#modelPrice").value = "100";
@@ -149,18 +229,21 @@ uploadForm.addEventListener("submit", async (event) => {
 registerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const data = Object.fromEntries(new FormData(registerForm).entries());
-
   try {
-    const result = await requestJson("/register-model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...data,
-        ...getAccountPayload(),
-      }),
+    await ensureWalletConnected();
+    const contracts = await ensureContractsLoaded();
+    const data = Object.fromEntries(new FormData(registerForm).entries());
+
+    const receipt = await sendLegacyTransaction(
+      contracts.modelRegistry.methods.registerModel(data.ipfsHash, data.price)
+    );
+
+    writeLog({
+      message: "Existing IPFS model registered through MetaMask.",
+      ipfsHash: data.ipfsHash,
+      transactionHash: receipt.transactionHash,
+      from: state.account,
     });
-    writeLog(result);
     await refreshModels({ updateLog: false });
     registerForm.reset();
     document.querySelector("#registerPrice").value = "100";
@@ -172,18 +255,38 @@ registerForm.addEventListener("submit", async (event) => {
 useForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const data = Object.fromEntries(new FormData(useForm).entries());
-
   try {
+    await ensureWalletConnected();
+    const contracts = await ensureContractsLoaded();
+    const data = Object.fromEntries(new FormData(useForm).entries());
+    const model = await contracts.modelRegistry.methods.getModel(data.modelId).call();
+
+    if (!model || model.id.toString() === "0") {
+      throw new Error("Model not found");
+    }
+
+    const paymentReceipt = await sendLegacyTransaction(
+      contracts.paymentContract.methods.payForModel(data.modelId),
+      {
+        value: model.price.toString(),
+      }
+    );
+
     const result = await requestJson("/use-model", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...data,
-        ...getAccountPayload(),
+        modelId: data.modelId,
+        inputData: data.inputData,
       }),
     });
-    writeLog(result);
+
+    writeLog({
+      message: "Payment confirmed in MetaMask and model executed.",
+      paymentTransactionHash: paymentReceipt.transactionHash,
+      from: state.account,
+      result,
+    });
     await refreshModels({ updateLog: false });
   } catch (error) {
     writeLog(error.message, true);
@@ -193,18 +296,22 @@ useForm.addEventListener("submit", async (event) => {
 rateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const data = Object.fromEntries(new FormData(rateForm).entries());
-
   try {
-    const result = await requestJson("/rate-model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...data,
-        ...getAccountPayload(),
-      }),
+    await ensureWalletConnected();
+    const contracts = await ensureContractsLoaded();
+    const data = Object.fromEntries(new FormData(rateForm).entries());
+
+    const receipt = await sendLegacyTransaction(
+      contracts.reputationContract.methods.rateModel(data.modelId, data.rating)
+    );
+
+    writeLog({
+      message: "Rating submitted through MetaMask.",
+      modelId: data.modelId,
+      rating: data.rating,
+      transactionHash: receipt.transactionHash,
+      from: state.account,
     });
-    writeLog(result);
     await refreshModels({ updateLog: false });
   } catch (error) {
     writeLog(error.message, true);
