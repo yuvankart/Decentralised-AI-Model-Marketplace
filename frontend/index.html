@@ -11,7 +11,7 @@
       <section class="toolbar" aria-label="Wallet and server controls">
         <div>
           <p class="eyebrow">Decentralized AI Model Marketplace Prototype</p>
-          <h1>Upload, pay, run, and rate AI models(Currently only JSON model specs).</h1>
+          <h1>Upload, pay, run, and rate AI models.</h1>
         </div>
         <div class="wallet-panel">
           <label for="apiBase">API server</label>
@@ -24,9 +24,9 @@
       <section class="grid" aria-label="Marketplace actions">
         <form id="uploadForm" class="panel">
           <h2>Upload Model</h2>
-          <p class="muted">Upload a JSON model spec. Example: linear, multiply, or add.</p>
-          <label for="modelFile">Model JSON file</label>
-          <input id="modelFile" name="file" type="file" accept="application/json,.json" required>
+          <p class="muted">Upload a JSON model spec or a small single-input ONNX model.</p>
+          <label for="modelFile">Model file</label>
+          <input id="modelFile" name="file" type="file" accept="application/json,.json,.onnx" required>
           <label for="modelPrice">Price in wei</label>
           <input id="modelPrice" name="price" type="number" min="1" value="100" required>
           <button type="submit">Upload and Register</button>

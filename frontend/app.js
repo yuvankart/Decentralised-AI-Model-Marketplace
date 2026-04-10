@@ -215,6 +215,7 @@ uploadForm.addEventListener("submit", async (event) => {
     writeLog({
       message: "Model uploaded to IPFS and registered on-chain through MetaMask.",
       cid: uploadResult.cid,
+      modelFormat: uploadResult.modelFormat,
       transactionHash: receipt.transactionHash,
       from: state.account,
     });

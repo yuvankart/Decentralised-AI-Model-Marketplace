@@ -22,6 +22,7 @@ const DEFAULT_MODEL_PRICE = process.env.DEFAULT_MODEL_PRICE_WEI || "100";
 const MODEL_RUNNER_URL = process.env.MODEL_RUNNER_URL || "http://127.0.0.1:8000/run-model";
 const MODEL_CACHE_DIR = path.resolve(__dirname, "model-cache");
 const WEB3_BUNDLE_PATH = path.resolve(__dirname, "node_modules", "web3", "dist", "web3.min.js");
+const SUPPORTED_MODEL_EXTENSIONS = new Set([".json", ".onnx"]);
 
 app.use(cors());
 app.use(express.json());
@@ -122,26 +123,54 @@ function validateModelSpec(modelSpec) {
   }
 }
 
-function getModelCachePath(cid) {
+function getModelCachePath(cid, extension = ".json") {
   const safeCid = cid.replace(/[^a-zA-Z0-9_-]/g, "");
-  return path.join(MODEL_CACHE_DIR, `${safeCid}.json`);
+  return path.join(MODEL_CACHE_DIR, `${safeCid}${extension}`);
 }
 
 async function cacheModelSpec(cid, modelSpec) {
   fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
   await fs.promises.writeFile(
-    getModelCachePath(cid),
+    getModelCachePath(cid, ".json"),
     JSON.stringify(modelSpec, null, 2)
   );
 }
 
+async function cacheModelFile(cid, extension, buffer) {
+  fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
+  const filePath = getModelCachePath(cid, extension);
+  await fs.promises.writeFile(filePath, buffer);
+  return filePath;
+}
+
 async function getCachedModelSpec(cid) {
   try {
-    const rawModel = await fs.promises.readFile(getModelCachePath(cid), "utf8");
+    const rawModel = await fs.promises.readFile(getModelCachePath(cid, ".json"), "utf8");
     return JSON.parse(rawModel);
   } catch {
     return null;
   }
+}
+
+async function getCachedModelFile(cid) {
+  for (const extension of SUPPORTED_MODEL_EXTENSIONS) {
+    try {
+      const filePath = getModelCachePath(cid, extension);
+      await fs.promises.access(filePath, fs.constants.R_OK);
+      return {
+        path: filePath,
+        format: extension === ".onnx" ? "onnx" : "json",
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function getUploadedExtension(file) {
+  return path.extname(file.originalname || "").toLowerCase();
 }
 
 app.get("/", (req, res) => {
@@ -235,8 +264,20 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const modelSpec = parseModelSpec(req.file.buffer);
-    validateModelSpec(modelSpec);
+    const extension = getUploadedExtension(req.file);
+    if (!SUPPORTED_MODEL_EXTENSIONS.has(extension)) {
+      return res.status(400).json({
+        error: "Unsupported model file. Upload a .json or .onnx model.",
+      });
+    }
+
+    let modelSpec = null;
+    let modelFormat = extension === ".onnx" ? "onnx" : "json";
+
+    if (modelFormat === "json") {
+      modelSpec = parseModelSpec(req.file.buffer);
+      validateModelSpec(modelSpec);
+    }
 
     const data = new FormData();
     data.append("file", req.file.buffer, req.file.originalname);
@@ -254,7 +295,11 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
     );
 
     const cid = response.data.IpfsHash;
-    await cacheModelSpec(cid, modelSpec);
+    if (modelFormat === "json") {
+      await cacheModelSpec(cid, modelSpec);
+    } else {
+      await cacheModelFile(cid, extension, req.file.buffer);
+    }
 
     const price = req.body.price || DEFAULT_MODEL_PRICE;
 
@@ -262,6 +307,7 @@ app.post("/upload-model", upload.single("file"), async (req, res) => {
       message: "Model uploaded to IPFS. Register it with MetaMask.",
       cid,
       price: price.toString(),
+      modelFormat,
       modelSpec,
     });
   } catch (error) {
@@ -284,18 +330,35 @@ app.post("/use-model", async (req, res) => {
       return res.status(404).json({ error: "Model not found" });
     }
 
-    const modelSpec = await getCachedModelSpec(model.ipfsHash);
-    const response = await axios.post(MODEL_RUNNER_URL, modelSpec ? { model_spec: modelSpec } : null, {
+    const cachedModel = await getCachedModelFile(model.ipfsHash);
+    const requestBody = {};
+
+    if (cachedModel?.format === "json") {
+      requestBody.model_spec = await getCachedModelSpec(model.ipfsHash);
+      requestBody.model_format = "json";
+    }
+
+    if (cachedModel?.format === "onnx") {
+      requestBody.model_format = "onnx";
+      requestBody.model_path = cachedModel.path;
+    }
+
+    const response = await axios.post(
+      MODEL_RUNNER_URL,
+      Object.keys(requestBody).length ? requestBody : null,
+      {
       params: {
         model_id: Number(modelId),
         input_data: Number(inputData),
         ipfs_hash: model.ipfsHash,
       },
-    });
+      }
+    );
 
     res.json({
       message: "Model executed after payment",
       model: formatModel(model),
+      modelFormat: cachedModel?.format || "unknown",
       result: response.data,
     });
   } catch (error) {

@@ -1,11 +1,19 @@
 import json
 import os
+import tempfile
 from functools import lru_cache
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 from fastapi import Body, FastAPI, HTTPException
+
+try:
+    import numpy as np
+    import onnxruntime as ort
+except ImportError:
+    np = None
+    ort = None
 
 app = FastAPI()
 
@@ -45,6 +53,24 @@ def fetch_model_spec(ipfs_hash: str) -> str:
         try:
             with urlopen(url, timeout=10) as response:
                 return response.read().decode("utf-8")
+        except HTTPError as exc:
+            errors.append(f"{url} -> HTTP {exc.code}")
+        except URLError as exc:
+            errors.append(f"{url} -> {exc.reason}")
+        except TimeoutError:
+            errors.append(f"{url} -> timed out")
+
+    detail = "; ".join(errors) if errors else "no IPFS gateways configured"
+    raise HTTPException(status_code=502, detail=f"Could not fetch model from IPFS: {detail}")
+
+
+def fetch_model_bytes(ipfs_hash: str) -> bytes:
+    errors = []
+
+    for url in build_ipfs_urls(ipfs_hash):
+        try:
+            with urlopen(url, timeout=10) as response:
+                return response.read()
         except HTTPError as exc:
             errors.append(f"{url} -> HTTP {exc.code}")
         except URLError as exc:
@@ -111,6 +137,61 @@ def run_model_spec(model_spec: dict[str, Any], input_data: float | int) -> float
     raise HTTPException(status_code=400, detail=f"Unsupported model type: {model_type}")
 
 
+def ensure_onnx_runtime() -> None:
+    if np is None or ort is None:
+        raise HTTPException(
+            status_code=500,
+            detail="ONNX support is not installed. Install onnxruntime and numpy in the backend environment.",
+        )
+
+
+def run_onnx_model(model_path: str, input_data: float | int) -> dict[str, Any]:
+    ensure_onnx_runtime()
+
+    try:
+        session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not load ONNX model: {exc}") from exc
+
+    inputs = session.get_inputs()
+    outputs = session.get_outputs()
+
+    if len(inputs) != 1:
+        raise HTTPException(status_code=400, detail="Only single-input ONNX models are supported")
+
+    input_tensor = np.array([[float(input_data)]], dtype=np.float32)
+
+    try:
+      raw_output = session.run(None, {inputs[0].name: input_tensor})
+    except Exception:
+      try:
+          input_tensor = np.array([float(input_data)], dtype=np.float32)
+          raw_output = session.run(None, {inputs[0].name: input_tensor})
+      except Exception as exc:
+          raise HTTPException(status_code=400, detail=f"ONNX inference failed: {exc}") from exc
+
+    first_output = raw_output[0]
+    output_array = np.asarray(first_output)
+    scalar_output = float(output_array.reshape(-1)[0])
+
+    return {
+        "model_name": os.path.basename(model_path),
+        "model_type": "onnx",
+        "input_name": inputs[0].name,
+        "output_name": outputs[0].name if outputs else "output",
+        "result": scalar_output,
+    }
+
+
+def materialize_onnx_file(ipfs_hash: str) -> str:
+    raw_model = fetch_model_bytes(ipfs_hash)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".onnx")
+    temp_file.write(raw_model)
+    temp_file.flush()
+    temp_file.close()
+    return temp_file.name
+
+
 @app.get("/")
 def home():
     return {"message": "AI Marketplace Backend Running"}
@@ -126,11 +207,29 @@ def run_model(
     model_id: int,
     input_data: float | int,
     ipfs_hash: str | None = None,
+    model_format: str | None = Body(default=None, embed=True),
+    model_path: str | None = Body(default=None, embed=True),
     model_spec: dict[str, Any] | None = Body(default=None, embed=True),
 ):
     # The Node server checks the blockchain registry before calling this endpoint.
     if model_id < 1:
         raise HTTPException(status_code=404, detail="Model not found")
+
+    if model_format == "onnx":
+        resolved_model_path = model_path or (materialize_onnx_file(ipfs_hash) if ipfs_hash else None)
+        if not resolved_model_path:
+            raise HTTPException(status_code=400, detail="ONNX model path or IPFS hash is required")
+
+        onnx_result = run_onnx_model(resolved_model_path, input_data)
+        return {
+            "model_id": model_id,
+            "model_name": onnx_result["model_name"],
+            "model_type": onnx_result["model_type"],
+            "input": input_data,
+            "input_name": onnx_result["input_name"],
+            "output_name": onnx_result["output_name"],
+            "result": onnx_result["result"],
+        }
 
     spec = validate_model_spec(model_spec) if model_spec else load_model_spec(ipfs_hash)
     result = run_model_spec(spec, input_data)
