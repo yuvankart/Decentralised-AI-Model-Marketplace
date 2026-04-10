@@ -1,14 +1,56 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
+const backendCwd = path.join(root, "backend");
+
+function resolveBackendCommand() {
+  const candidates = [
+    {
+      command: path.join(backendCwd, "venv", "bin", "uvicorn"),
+      args: ["main:app", "--host", "127.0.0.1", "--port", "8000"],
+    },
+    {
+      command: path.join(backendCwd, "venv", "Scripts", "uvicorn.exe"),
+      args: ["main:app", "--host", "127.0.0.1", "--port", "8000"],
+    },
+    {
+      command: path.join(backendCwd, "venv", "Scripts", "python.exe"),
+      args: ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
+    },
+    {
+      command: "python3",
+      args: ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
+    },
+    {
+      command: "python",
+      args: ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate.command.includes(path.sep)) {
+      if (fs.existsSync(candidate.command)) {
+        return candidate;
+      }
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return candidates[candidates.length - 1];
+}
+
+const backendService = resolveBackendCommand();
 
 const services = [
   {
     name: "backend",
-    command: path.join(root, "backend", "venv", "bin", "uvicorn"),
-    args: ["main:app", "--host", "127.0.0.1", "--port", "8000"],
-    cwd: path.join(root, "backend"),
+    command: backendService.command,
+    args: backendService.args,
+    cwd: backendCwd,
   },
   {
     name: "server",
@@ -51,6 +93,7 @@ console.log("Starting local demo services...");
 console.log("Frontend: http://127.0.0.1:5173");
 console.log("Node API:  http://127.0.0.1:3001");
 console.log("FastAPI:   http://127.0.0.1:8000");
+console.log(`Backend command: ${backendService.command} ${backendService.args.join(" ")}`);
 console.log("Press Ctrl+C to stop all services.\n");
 
 for (const service of services) {

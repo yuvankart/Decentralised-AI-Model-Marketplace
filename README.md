@@ -38,6 +38,7 @@ Install these before running:
 - Python 3.11+ or compatible Python 3 environment
 - Ganache
 - MetaMask browser extension
+- Pinata account with API key and secret
 
 ## 1. Install Dependencies
 
@@ -52,7 +53,7 @@ From the backend folder:
 ```bash
 cd backend
 python3 -m venv venv
-venv/bin/pip install fastapi uvicorn onnx onnxruntime numpy
+venv/bin/pip install -r requirements.txt
 cd ..
 ```
 
@@ -67,10 +68,12 @@ cd ..
 ## 2. Configure Environment Variables
 
 Create a file named `.env` in the project root:
-For this you have to create an account in pinata and get the api keys. So please do this beforehand. I have provided my own pinata api keys, so please dont upload this project anywhere.
+
+You need a Pinata account and API keys for fresh model uploads.
+
 ```env
-PINATA_API_KEY=your_pinata_api_key(use mine if needed -> 9092f858d6b0cd7fb15c)
-PINATA_SECRET_API_KEY=your_pinata_secret_api_key(07134fac9d879e126e934354af5325c85726df01d4302801b840789218cab258)
+PINATA_API_KEY=your_pinata_api_key
+PINATA_SECRET_API_KEY=your_pinata_secret_api_key
 GANACHE_URL=http://127.0.0.1:7545
 TRUFFLE_NETWORK_ID=5777
 MODEL_RUNNER_URL=http://127.0.0.1:8000/run-model
@@ -94,8 +97,9 @@ http://127.0.0.1:7545
 In MetaMask:
 
 1. Add a custom local network using Ganache RPC URL
-2. Import a Ganache account using one of Ganache's private keys(You might need to import 2 accounts so that you can use one for model owner and one fro model user.)
-3. Switch MetaMask to the Ganache network
+2. Import a Ganache account using one of Ganache's private keys
+3. Optionally import a second Ganache account if you want to demonstrate one account as the model owner and another as the model user
+4. Switch MetaMask to the Ganache network
 
 This is important because blockchain write actions in the frontend are signed through MetaMask.
 
@@ -134,6 +138,8 @@ http://127.0.0.1:5173
 ```
 
 If the browser was already open, do a hard refresh after restarting the demo.
+
+If `npm run demo` does not start because Python packages are missing, make sure the backend setup in Step 1 was completed successfully.
 
 ## 7. Sample Model Files
 
@@ -182,13 +188,14 @@ So if the input is `4`, the expected output is:
 ### Upload and Register a Model
 
 1. Open the frontend
-2. Click `Connect MetaMask`(do this after you setup or import the accounts in the MetaMask from Ganache network).Once again this requires Ganache to be running simultaneously.
-3. Choose a sample file(do this using one account and use the model using another account to really test the project's use):
+2. Make sure Ganache is still running and MetaMask is connected to the Ganache network
+3. Click `Connect MetaMask`
+4. Choose a sample file. For a complete demo, you can upload using one Ganache account and use the model from a different Ganache account:
    - `backend/sample_models/triple_plus_one.json`, or
    - `backend/sample_models/small_regression.onnx`
-4. Enter a price in wei
-5. Click `Upload and Register`
-6. Approve the transaction in MetaMask
+5. Enter a price in wei
+6. Click `Upload and Register`
+7. Approve the transaction in MetaMask
 
 ### View Available Models
 
@@ -232,6 +239,7 @@ http://127.0.0.1:8000/
 - The Node.js server uploads model files to Pinata and coordinates execution.
 - The FastAPI backend executes JSON model specs and small ONNX regression models.
 - ONNX execution is currently intended for models uploaded through this app, because the server caches uploaded files locally for reliable execution.
+- Existing arbitrary IPFS CIDs are easiest to use with JSON models. ONNX execution is most reliable when the ONNX file is uploaded through this application.
 
 ## 11. Known Limitations
 
@@ -239,6 +247,7 @@ http://127.0.0.1:8000/
 - The project is designed for local Ganache testing
 - FastAPI execution is still centralized, even though storage and transactions are decentralized
 - Pinata API keys are required for fresh uploads
+- There is currently no automated smart contract test suite included in the repository
 
 ## 12. Useful Commands
 
@@ -247,13 +256,16 @@ From the project root:
 ```bash
 npm run compile
 npm run deploy
+npm run backend
+npm run server
+npm run frontend
 npm run demo
 ```
 
-From the backend folder:
+From the backend folder, you can also start FastAPI manually with:
 
 ```bash
-venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 From the server folder:
